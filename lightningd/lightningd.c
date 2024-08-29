@@ -530,6 +530,90 @@ static const char *find_my_directory(const tal_t *ctx, const char *argv0)
 	return path_dirname(ctx, take(me));
 }
 
+/* Simplify a path string. Doesn't make system calls to do this so it doesn't
+ * resolve symlinks, and the path is not required to exist.
+ * It handles relative and absolute paths.
+ * It removes double '/', unnecessary '.' and tries when possible to remove '..'
+ * by walking one directory up the tree.
+ *
+ * For an absolute dir the general result is: /a1/a2/a3/a4
+ * For a relative dir the general result is: ../../../a1/a2/a3/a4
+ *
+ * Eg.
+ * "" -> NULL
+ * "/" -> "/"
+ * "//" -> "/"
+ * "/././ -> "/"
+ * "a/.." -> "."
+ * "a/../.." -> ".."
+ * "./../a" -> "../a"
+ * "/../../../" -> "/"
+ * "/../../a/" -> "/a"
+ * "/../../a/.." -> "/"
+ * */
+static char *pathstr_simplify(const tal_t *ctx, const char *path)
+{
+	/* For simplicity we use a static array as a stack, we don't expect more
+	 * than 300 elements in the path. */
+	int stack_size = 0;
+	char *stack[300];
+	char *prefix;
+	char *suffix;
+	const char *separator;
+
+	/* empty in, empty out */
+	if (path == NULL || path[0] == 0)
+		return NULL;
+
+	const bool is_absolute = path[0] == '/';
+
+	if (is_absolute)
+		prefix = tal_strdup(tmpctx, "/");
+	else
+		/* to this prefix we will append all '..' that come before any
+		 * valid directory name */
+		prefix = tal_strdup(tmpctx, "");
+
+	char **parts = tal_strsplit(tmpctx, path, PATH_SEP_STR, STR_NO_EMPTY);
+
+	/* inspect all elements */
+	for (size_t i = 0; parts[i]; i++) {
+
+		if (streq(parts[i], "."))
+			continue;
+
+		if (streq(parts[i], "..")) {
+			if (stack_size)
+				stack_size--;
+			else if (!is_absolute) {
+				tal_append_fmt(&prefix, "%s..",
+					       prefix[0] == 0 ? "" : "/");
+			}
+			// else: .. on top of root is ignored
+			continue;
+		}
+
+		assert(stack_size < sizeof(stack) / sizeof(stack[0]));
+		stack[stack_size++] = tal_strdup(tmpctx, parts[i]);
+	}
+
+	stack[stack_size] = 0;
+	suffix = tal_strjoin(tmpctx, stack, PATH_SEP_STR, STR_NO_TRAIL);
+
+	const size_t prefix_len = strlen(prefix);
+	const size_t suffix_len = strlen(suffix);
+	if (prefix_len && suffix_len && prefix[prefix_len - 1] != '/' &&
+	    suffix[0] != '/')
+		separator = "/";
+	else
+		separator = "";
+
+	char *ret = tal_fmt(ctx, "%s%s%s", prefix, separator, suffix);
+	if (streq(ret, ""))
+		tal_append_fmt(&ret, ".");
+	return ret;
+}
+
 /* How to get from abspath dir1 to abspath dir2? */
 static const char *relative(const tal_t *ctx, const char *dir1, const char *dir2)
 {
@@ -538,8 +622,8 @@ static const char *relative(const tal_t *ctx, const char *dir1, const char *dir2
 	char *backwards;
 
 	/* Collapse double /, and split into parts */
-	dir1_parts = path_split(tmpctx, take(path_simplify(NULL, dir1)));
-	dir2_parts = path_split(tmpctx, take(path_simplify(NULL, dir2)));
+	dir1_parts = path_split(tmpctx, take(pathstr_simplify(NULL, dir1)));
+	dir2_parts = path_split(tmpctx, take(pathstr_simplify(NULL, dir2)));
 
 	for (common = 0;
 	     dir1_parts[common]
@@ -547,13 +631,21 @@ static const char *relative(const tal_t *ctx, const char *dir1, const char *dir2
 		     && streq(dir1_parts[common], dir2_parts[common]);
 	     common++);
 
-	/* We append .. for every non-shared part in dir1_parts */
-	for (size_t i = common; dir1_parts[i]; i++)
-		dir1_parts[i] = "..";
+	if (streq(dir1_parts[0], "/"))
+		backwards = "";
+	else{
+		/* We append .. for every non-shared part in dir1_parts */
+		for (size_t i = common; dir1_parts[i]; i++)
+			dir1_parts[i] = "..";
 
-	backwards = tal_strjoin(tmpctx, dir1_parts + common, PATH_SEP_STR, STR_TRAIL);
-	return tal_fmt(ctx, "%s%s", backwards,
-		       tal_strjoin(tmpctx, dir2_parts + common, PATH_SEP_STR, STR_NO_TRAIL));
+		backwards = tal_strjoin(tmpctx, dir1_parts + common,
+					PATH_SEP_STR, STR_TRAIL);
+	}
+
+	return pathstr_simplify(
+	    ctx, tal_fmt(tmpctx, "./%s%s", backwards,
+			 tal_strjoin(tmpctx, dir2_parts + common, PATH_SEP_STR,
+				     STR_NO_TRAIL)));
 }
 
 /* Determine the correct daemon dir. */
