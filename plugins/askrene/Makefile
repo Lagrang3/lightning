@@ -3,6 +3,7 @@ PLUGIN_ASKRENE_SRC := \
 	plugins/askrene/layer.c \
 	plugins/askrene/reserve.c \
 	plugins/askrene/mcf.c \
+	plugins/askrene/constrained_mcf.c \
 	plugins/askrene/dijkstra.c \
 	plugins/askrene/flow.c \
 	plugins/askrene/refine.c \
@@ -16,6 +17,7 @@ PLUGIN_ASKRENE_HEADER := \
 	plugins/askrene/layer.h \
 	plugins/askrene/reserve.h \
 	plugins/askrene/mcf.h \
+	plugins/askrene/constrained_mcf.h \
 	plugins/askrene/dijkstra.h \
 	plugins/askrene/flow.h \
 	plugins/askrene/refine.h \

@@ -18,6 +18,7 @@
 #include <errno.h>
 #include <math.h>
 #include <plugins/askrene/askrene.h>
+#include <plugins/askrene/constrained_mcf.h>
 #include <plugins/askrene/flow.h>
 #include <plugins/askrene/layer.h>
 #include <plugins/askrene/mcf.h>
@@ -338,6 +339,7 @@ static u64 time_delta_ms(struct timerel t)
 
 enum algorithm {
 	ALGO_DEFAULT,
+	ALGO_CONSTRAINED_MCF,
 };
 
 static struct command_result *
@@ -348,6 +350,8 @@ param_algorithm(struct command *cmd, const char *name, const char *buffer,
 	*algo = tal(cmd, enum algorithm);
 	if (streq(algo_str, "default"))
 		**algo = ALGO_DEFAULT;
+	else if (streq(algo_str, "constrained_mcf"))
+		**algo = ALGO_CONSTRAINED_MCF;
 	else
 		return command_fail_badparam(cmd, name, buffer, tok,
 					     "unknown algorithm");
@@ -606,12 +610,20 @@ static struct command_result *do_getroutes(struct command *cmd,
 	/* Compute the routes. At this point we might select between multiple
 	 * algorithms. Right now there is only one algorithm available. */
 	struct timemono time_start = time_mono();
-	assert(*info->dev_algo == ALGO_DEFAULT);
-	err = default_routes(rq, rq, srcnode, dstnode, *info->amount,
-			     /* only one path? = */
-			     have_layer(info->layers, "auto.no_mpp_support"),
-			     *info->maxfee, *info->finalcltv, *info->maxdelay,
-			     &flows, &probability);
+	switch (*info->dev_algo) {
+	case ALGO_CONSTRAINED_MCF:
+		err = constrained_mcf_routes(
+		    rq, rq, srcnode, dstnode, *info->amount, *info->maxfee,
+		    *info->maxdelay, &flows, &probability);
+		break;
+	default:
+		err = default_routes(
+		    rq, rq, srcnode, dstnode, *info->amount,
+		    /* only one path? = */
+		    have_layer(info->layers, "auto.no_mpp_support"),
+		    *info->maxfee, *info->finalcltv, *info->maxdelay, &flows,
+		    &probability);
+	}
 	struct timerel time_delta = timemono_between(time_mono(), time_start);
 
 	/* log the time of computation */

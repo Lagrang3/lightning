@@ -176,4 +176,54 @@ bool mcf_refinement(const tal_t *ctx,
 		    const s64 *cost,
 		    s64 *potential);
 
+/* Given a graph G=(N,A) and a list of cost functions z[num_constraints]
+ *
+ * minimize z[0](x,y) = sum_{(i,j) in A} cost[0][i,j] * x[i,j] + charge[0][i,j] * y[i,j]
+ *
+ * such that:
+ * 	// capacity constraints
+ * 	0<= x[i,j] <= capacity[i,j]
+ *
+ * 	// flow conservation constraints
+ * 	sum_{(i,j)} x[i,j] - sum_{(j,i)} x[j,i] = excess[i]
+ *
+ * 	// coupling between x and y
+ * 	0<= x[i,j] <= capacity[i,j] * y[i,j]
+ *
+ * 	// other constraints
+ * 	z[k](x,y) = sum_{(i,j) in A} cost[k][i,j] * x[i,j] + charge[k][i,j] * y[i,j]
+ * 		<= bound[k]
+ * 	for 1<=k<num_constraints
+ *
+ * ctx: allocator
+ * graph: problem's topology, nodes, arcs and duals
+ * excess[num_nodes]: defines the problem's sources and sinks, ie.
+ * 	a source is a node n for which excess[n]>0, for a sink excess[n]<0 and
+ * 	routing nodes have excess[n]=0. The problem is solved when excess[n]=0
+ * 	for every node.
+ * capacity[num_arcs]: the residual capacity of every arc and
+ * 	corresponding dual, here we write the final solution.
+ * num_constraints: the number of cost functions in our problem, one is the
+ * 	objective function (that we want to minimize) and the rest are side
+ * 	constraints.
+ * cost[num_constraints][num_arcs]: proportional cost, ie. cost per
+ * 	unit of flow for every cost function and arc.
+ * charge[num_constraints][num_arcs]: fixed charge, ie. activation
+ *	cost for every cost function and arc.
+ * bound[num_constraints]: defines the problem constraints,
+ * 	cost function k cannot exceed bound[k].
+ * tolerance: we stop once we find a feasible solution that deviates at most
+ *	this number from the optimal solution, ie.
+ *		|C-C*|/C* < tolerance
+ *	where C* is the optimal solution and C is the approximative solution.
+ * max_num_iterations: we stop if we reach this number of iterations
+ *
+ * */
+bool solve_constrained_fcnfp(const tal_t *ctx, const struct graph *graph,
+			     s64 *excess, s64 *capacity,
+			     const size_t num_constraints, s64 **cost,
+			     s64 **charge, const s64 *bound,
+			     const double tolerance,
+			     const size_t max_num_iterations);
+
 #endif /* LIGHTNING_PLUGINS_ASKRENE_ALGORITHM_H */
